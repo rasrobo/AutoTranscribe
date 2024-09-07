@@ -2,8 +2,6 @@
 
 # Define language mode (default to English)
 LANGUAGE_MODE="en"
-# To use auto language detection, change the above line to:
-# LANGUAGE_MODE="auto"
 
 # Define log file location
 LOG_FILE=~/scripts/AT.log
@@ -18,23 +16,40 @@ mkdir -p "$LOCK_DIR"
 # Define monitor directory
 MONITOR_DIR="/mnt/e/AV/Capture"
 
-# Function to find and process pending files
-process_pending_files() {
+# Function to find pending files
+find_pending_files() {
     find "$MONITOR_DIR" -type f \( -name "*.mp4" -o -name "*.m4a" -o -name "*.mp3" \) | sort -r | while read -r file_path; do
         base_name="${file_path%.*}"
         if [ ! -f "${base_name}.txt" ] && [ ! -f "${base_name}.srt" ]; then
-            echo "Processing: $file_path"
-            process_file "$file_path"
+            echo "$file_path"
         fi
     done
+}
+
+# Display pending files
+display_queue() {
+    echo "Pending files requiring transcription:"
+    local count=0
+    while IFS= read -r file; do
+        echo " - $file"
+        ((count++))
+    done
+    echo "Total files pending: $count"
 }
 
 # Function to process a single file
 process_file() {
     local file_path="$1"
     local base_name="${file_path%.*}"
+    local file_name=$(basename "$file_path")
     local lock_file="$LOCK_DIR/$(basename "$base_name").lock"
     local output_dir=$(dirname "$file_path")
+
+    # Check if file exists
+    if [ ! -f "$file_path" ]; then
+        echo "$(date): Error: File not found: $file_path" >> "$LOG_FILE"
+        return
+    fi
 
     # Check for existing lock before processing
     if [ -d "$lock_file" ]; then
@@ -47,7 +62,7 @@ process_file() {
         echo "Lock acquired for $file_path"
         if [[ "$file_path" == *.mp4 || "$file_path" == *.m4a ]]; then
             echo "$(date): Starting FFmpeg conversion for $file_path" >> "$LOG_FILE"
-            AUDIO_FILE="${base_name}.mp3"
+            AUDIO_FILE="${output_dir}/${base_name##*/}.mp3"
             if ! timeout 30m ffmpeg -nostdin -y -i "$file_path" -vn -ar 44100 -ac 2 -b:a 192k -threads 2 "$AUDIO_FILE" 2>> "$LOG_FILE"; then
                 echo "$(date): Error: FFmpeg conversion failed for $file_path" >> "$LOG_FILE"
                 rmdir "$lock_file"
@@ -85,10 +100,16 @@ cleanup() {
 trap cleanup EXIT
 
 # Handle SIGINT (Ctrl-C) to ensure cleanup
-trap "echo 'Interrupted Cleaning up...'; cleanup; exit 1" SIGINT
+trap "echo 'Interrupted. Cleaning up...'; cleanup; exit 1" SIGINT
+
+# Get and display pending files
+pending_files=$(find_pending_files)
+echo "$pending_files" | display_queue
 
 # Process pending files
-process_pending_files
+echo "$pending_files" | while IFS= read -r file; do
+    process_file "$file"
+done
 
 echo "Setting up watches..."
 inotifywait -m -e close_write --format '%w%f' "$MONITOR_DIR" | while read NEWFILE
