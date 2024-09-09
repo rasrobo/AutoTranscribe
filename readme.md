@@ -121,3 +121,50 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details.
 
+Certainly! I'll update the README to explain how Windows users can benefit from this script using Windows Subsystem for Linux (WSL). Here's an updated section you can add to your README:
+
+```markdown
+## Windows Users
+
+Windows users can also benefit from this script by using Windows Subsystem for Linux (WSL). This allows you to run the script in a Linux environment while monitoring and processing files in your Windows directories.
+
+### Setup for Windows Users
+
+1. Install WSL on your Windows machine if you haven't already. You can follow the [official Microsoft guide](https://docs.microsoft.com/en-us/windows/wsl/install) for installation instructions.
+
+2. Once WSL is set up, you can access your Windows files from within the Linux environment.
+
+3. To monitor a Windows directory, you'll need to use the appropriate path. For example, to monitor your Windows Downloads folder, you would use a path like this:
+
+   ```bash
+   MONITOR_DIR="/mnt/c/Users/yourusername/Downloads"
+   ```
+
+   Replace `yourusername` with your actual Windows username.
+
+4. Update the `MONITOR_DIR` variable in the script with the appropriate Windows path:
+
+   ```bash
+   # Define monitor directory
+   MONITOR_DIR="/mnt/c/Users/yourusername/Downloads"
+   ```
+
+5. Run the script as usual within your WSL environment.
+
+### Example
+
+Let's say your Windows username is "JohnDoe" and you want to monitor the Downloads folder. Your script would look like this:
+
+```bash
+#!/bin/bash
+
+# Other script contents...
+
+# Define monitor directory
+MONITOR_DIR="/mnt/c/Users/JohnDoe/Downloads"
+
+```
+
+This setup allows the script to monitor your Windows Downloads folder, convert any new video files to audio, and transcribe them, all while running in the WSL environment.
+
+Note: Ensure that your WSL environment has all the necessary dependencies installed (ffmpeg, whisper, etc.) as described in the main installation instructions.
