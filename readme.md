@@ -121,9 +121,6 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details.
 
-Certainly! I'll update the README to explain how Windows users can benefit from this script using Windows Subsystem for Linux (WSL). Here's an updated section you can add to your README:
-
-```markdown
 ## Windows Users
 
 Windows users can also benefit from this script by using Windows Subsystem for Linux (WSL). This allows you to run the script in a Linux environment while monitoring and processing files in your Windows directories.
