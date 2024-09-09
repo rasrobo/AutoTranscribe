@@ -52,8 +52,6 @@ This automation ensures that your transcripts are always up-to-date without requ
 
 By using AutoTranscribe, you can streamline your workflow, save time, and make your recorded content more accessible and useful.
 
-Here's the continuation of the README content, focusing on the implementation details and usage instructions:
-
 ## Implementation Details
 
 AutoTranscribe is implemented as a bash script that utilizes several key components:
@@ -69,13 +67,26 @@ The script performs the following steps:
 3. Transcribes the audio using Whisper.
 4. Saves the transcription alongside the original file.
 
-## Usage
+## Installation and Usage
 
-To use AutoTranscribe:
+### Prerequisites
 
-1. Ensure you have FFmpeg, Whisper, and inotify-tools installed on your system.
+Before installing AutoTranscribe, ensure you have the following dependencies installed:
 
-2. Clone this repository:
+- FFmpeg
+- Whisper
+- inotify-tools (for Linux)
+
+### Linux
+
+1. Install dependencies:
+   ```
+   sudo apt-get update
+   sudo apt-get install ffmpeg inotify-tools
+   pip install whisper
+   ```
+
+2. Clone the repository:
    ```
    git clone https://github.com/rasrobo/AutoTranscribe.git
    ```
@@ -85,17 +96,86 @@ To use AutoTranscribe:
    chmod +x AutoTranscribe.sh
    ```
 
-4. Edit the script to set your desired `MONITOR_DIR`:
-   ```bash
-   MONITOR_DIR="/path/to/your/media/folder"
-   ```
+4. Edit the `MONITOR_DIR` variable in the script to point to your desired directory.
 
 5. Run the script:
    ```
    ./AutoTranscribe.sh
    ```
 
-To run the script in the background or on a schedule, you can use `nohup` or set up a cron job.
+### macOS
+
+1. Install dependencies using Homebrew:
+   ```
+   brew install ffmpeg
+   pip install whisper
+   ```
+
+2. Clone the repository:
+   ```
+   git clone https://github.com/rasrobo/AutoTranscribe.git
+   ```
+
+3. Make the script executable:
+   ```
+   chmod +x AutoTranscribe.sh
+   ```
+
+4. Edit the `MONITOR_DIR` variable in the script to point to your desired directory.
+
+5. Run the script:
+   ```
+   ./AutoTranscribe.sh
+   ```
+
+### Windows (using WSL)
+
+1. Install Windows Subsystem for Linux (WSL) following the [official Microsoft guide](https://docs.microsoft.com/en-us/windows/wsl/install).
+
+2. Open a WSL terminal and install dependencies:
+   ```
+   sudo apt-get update
+   sudo apt-get install ffmpeg inotify-tools
+   pip install whisper
+   ```
+
+3. Clone the repository:
+   ```
+   git clone https://github.com/rasrobo/AutoTranscribe.git
+   ```
+
+4. Make the script executable:
+   ```
+   chmod +x AutoTranscribe.sh
+   ```
+
+5. Edit the `MONITOR_DIR` variable in the script to point to your Windows directory:
+   ```
+   MONITOR_DIR="/mnt/c/Users/YourUsername/path/to/monitor"
+   ```
+
+6. Run the script:
+   ```
+   ./AutoTranscribe.sh
+   ```
+
+### Running in Background
+
+To run AutoTranscribe in the background:
+
+1. Use `nohup`:
+   ```
+   nohup ./AutoTranscribe.sh &
+   ```
+
+2. Or set up a cron job:
+   ```
+   crontab -e
+   ```
+   Add the following line to run every 15 minutes:
+   ```
+   */15 * * * * /path/to/AutoTranscribe.sh
+   ```
 
 ## Configuration
 
@@ -159,7 +239,6 @@ Let's say your Windows username is "JohnDoe" and you want to monitor the Downloa
 
 # Define monitor directory
 MONITOR_DIR="/mnt/c/Users/JohnDoe/Downloads"
-
 ```
 
 This setup allows the script to monitor your Windows Downloads folder, convert any new video files to audio, and transcribe them, all while running in the WSL environment.
