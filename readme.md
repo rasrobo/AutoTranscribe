@@ -77,7 +77,7 @@ To use AutoTranscribe:
 
 2. Clone this repository:
    ```
-   git clone https://github.com/yourusername/AutoTranscribe.git
+   git clone https://github.com/rasrobo/AutoTranscribe.git
    ```
 
 3. Make the script executable:
