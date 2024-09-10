@@ -10,11 +10,16 @@ import platform
 import difflib
 
 # Set up logging
-logging.basicConfig(filename='autotranscribe.log', level=logging.INFO,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+def setup_logging():
+    home = Path.home()
+    log_dir = home / "logs" / "AutoTranscribe"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "autotranscribe.log"
+    logging.basicConfig(filename=str(log_file), level=logging.INFO,
+                        format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Define constants
-LOCK_DIR = Path("/tmp/transcription_locks")
+LOCK_DIR = Path(os.getenv('TEMP', '/tmp')) / "transcription_locks"
 MONITOR_DIR = Path("/mnt/e/AV/Capture")  # Adjust this path as needed
 MAX_RETRIES = 3
 REPETITION_THRESHOLD = 0.9  # 90% similarity
@@ -100,6 +105,7 @@ def process_file(file_path):
             logging.info(f"Lock released for {file_path}")
 
 def main():
+    setup_logging()
     LOCK_DIR.mkdir(parents=True, exist_ok=True)
 
     pending_files = find_pending_files()
@@ -126,7 +132,7 @@ if __name__ == "__main__":
     if args.monitor_dir:
         MONITOR_DIR = Path(args.monitor_dir)
 
-    if platform.system() == "Windows" and not os.environ.get('WSL_DISTRO_NAME'):
+    if platform.system() == "Windows":
         # Adjust paths for Windows
         LOCK_DIR = Path(os.environ['TEMP']) / "transcription_locks"
         if str(MONITOR_DIR).startswith("/mnt/"):
