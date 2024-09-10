@@ -8,6 +8,7 @@ import logging
 import argparse
 import platform
 import difflib
+import shutil
 
 # Set up logging
 def setup_logging():
@@ -59,7 +60,10 @@ def process_file(file_path):
                 "ffmpeg", "-y", "-i", str(file_path), "-vn", "-ar", "44100",
                 "-ac", "2", "-b:a", "192k", "-threads", "2", str(audio_file)
             ]
-            subprocess.run(ffmpeg_cmd, check=True, timeout=1800)
+            result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, timeout=1800)
+            if result.returncode != 0:
+                logging.error(f"FFmpeg conversion failed for {file_path}: {result.stderr}")
+                return
             file_path = audio_file
 
         if file_path.exists():
@@ -86,22 +90,20 @@ def process_file(file_path):
                     logging.info(f"Transcription successful for {file_path}")
                     break
                 else:
-                    logging.error(f"Transcription attempt {attempt + 1} failed for {file_path}")
+                    logging.error(f"Transcription attempt {attempt + 1} failed for {file_path}: {result.stderr}")
             
             if attempt == MAX_RETRIES - 1:
                 logging.error(f"All transcription attempts failed for {file_path}")
         else:
             logging.error(f"Error: {file_path} not found after conversion.")
 
-    except subprocess.CalledProcessError as e:
-        logging.error(f"Error: Command failed: {e}")
     except subprocess.TimeoutExpired:
         logging.error(f"Error: Command timed out for {file_path}")
     except Exception as e:
         logging.error(f"Error processing {file_path}: {e}")
     finally:
         if lock_file.exists():
-            lock_file.rmdir()
+            shutil.rmtree(lock_file, ignore_errors=True)
             logging.info(f"Lock released for {file_path}")
 
 def main():
