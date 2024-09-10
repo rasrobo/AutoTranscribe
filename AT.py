@@ -40,6 +40,21 @@ def display_queue(pending_files):
         print(f" - {file}")
     print(f"Total files pending: {len(pending_files)}")
 
+def convert_to_audio(input_file, output_file):
+    ffmpeg_cmd = [
+        "ffmpeg", "-y", "-i", str(input_file), "-vn", "-ar", "44100",
+        "-ac", "2", "-b:a", "192k", "-threads", "2", str(output_file)
+    ]
+    try:
+        result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, check=True, timeout=1800)
+        logging.info(f"Successfully converted {input_file} to audio")
+        return True
+    except subprocess.CalledProcessError as e:
+        logging.error(f"FFmpeg conversion failed for {input_file}: {e.stderr}")
+    except subprocess.TimeoutExpired:
+        logging.error(f"FFmpeg conversion timed out for {input_file}")
+    return False
+
 def process_file(file_path):
     base_name = file_path.with_suffix('')
     lock_file = LOCK_DIR / f"{base_name.name}.lock"
@@ -55,14 +70,7 @@ def process_file(file_path):
 
         if file_path.suffix in ('.mp4', '.m4a'):
             audio_file = base_name.with_suffix('.mp3')
-            logging.info(f"Starting FFmpeg conversion for {file_path}")
-            ffmpeg_cmd = [
-                "ffmpeg", "-y", "-i", str(file_path), "-vn", "-ar", "44100",
-                "-ac", "2", "-b:a", "192k", "-threads", "2", str(audio_file)
-            ]
-            result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, timeout=1800)
-            if result.returncode != 0:
-                logging.error(f"FFmpeg conversion failed for {file_path}: {result.stderr}")
+            if not convert_to_audio(file_path, audio_file):
                 return
             file_path = audio_file
 
@@ -75,8 +83,12 @@ def process_file(file_path):
                     "whisper", str(file_path), "--model", "tiny",
                     "--language", LANGUAGE_MODE, "--output_dir", str(output_dir)
                 ]
-                result = subprocess.run(whisper_cmd, capture_output=True, text=True, timeout=3600)
-                
+                try:
+                    result = subprocess.run(whisper_cmd, capture_output=True, text=True, timeout=3600)
+                except subprocess.TimeoutExpired:
+                    logging.error(f"Whisper transcription timed out for {file_path}")
+                    continue
+
                 # Check for repetitive output
                 if attempt > 0:
                     similarity = difflib.SequenceMatcher(None, previous_output, result.stdout).ratio()
@@ -97,8 +109,6 @@ def process_file(file_path):
         else:
             logging.error(f"Error: {file_path} not found after conversion.")
 
-    except subprocess.TimeoutExpired:
-        logging.error(f"Error: Command timed out for {file_path}")
     except Exception as e:
         logging.error(f"Error processing {file_path}: {e}")
     finally:
