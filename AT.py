@@ -9,6 +9,7 @@ import argparse
 import platform
 import difflib
 import shutil
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Set up logging
 def setup_logging():
@@ -16,15 +17,16 @@ def setup_logging():
     log_dir = home / "logs" / "AutoTranscribe"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "autotranscribe.log"
-    logging.basicConfig(filename=str(log_file), level=logging.INFO,
+    logging.basicConfig(filename=str(log_file), level=logging.DEBUG,
                         format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Define constants
 LOCK_DIR = Path(os.getenv('TEMP', '/tmp')) / "transcription_locks"
 MONITOR_DIR = Path("/mnt/e/AV/Capture")  # Adjust this path as needed
 MAX_RETRIES = 3
-REPETITION_THRESHOLD = 0.9  # 90% similarity
+REPETITION_THRESHOLD = 0.95  # Increased from 0.9 to 0.95
 LANGUAGE_MODE = "en"  # Set to "en" for English or "auto" for automatic language detection
+MAX_CONCURRENT_PROCESSES = 2  # Reduced from 4 to 2
 
 def find_pending_files():
     pending_files = []
@@ -40,13 +42,33 @@ def display_queue(pending_files):
         print(f" - {file}")
     print(f"Total files pending: {len(pending_files)}")
 
+def is_valid_media_file(file_path):
+    try:
+        result = subprocess.run(['ffprobe', '-v', 'error', '-show_entries',
+                                 'format=duration', '-of',
+                                 'default=noprint_wrappers=1:nokey=1', str(file_path)],
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                timeout=30)
+        logging.debug(f"FFprobe output for {file_path}: {result.stdout.decode().strip()}")
+        return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        logging.error(f"Timeout checking file integrity: {file_path}")
+        return False
+    except Exception as e:
+        logging.error(f"Error checking file integrity: {file_path} - {str(e)}")
+        return False
+
 def convert_to_audio(input_file, output_file):
     ffmpeg_cmd = [
-        "ffmpeg", "-y", "-i", str(input_file), "-vn", "-ar", "44100",
-        "-ac", "2", "-b:a", "192k", "-threads", "2", str(output_file)
+        "ffmpeg", "-nostdin", "-y", "-i", str(input_file), "-vn", "-ar", "44100",
+        "-ac", "2", "-b:a", "192k", "-threads", "1", str(output_file)
     ]
     try:
         result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, check=True, timeout=1800)
+        logging.info(f"FFmpeg output for {input_file}:\n{result.stdout}")
+        if result.stderr:
+            logging.warning(f"FFmpeg warnings/errors for {input_file}:\n{result.stderr}")
         logging.info(f"Successfully converted {input_file} to audio")
         return True
     except subprocess.CalledProcessError as e:
@@ -68,6 +90,10 @@ def process_file(file_path):
         lock_file.mkdir(parents=True, exist_ok=False)
         logging.info(f"Lock acquired for {file_path}")
 
+        if not is_valid_media_file(file_path):
+            logging.error(f"Skipping invalid or corrupted file: {file_path}")
+            return
+
         if file_path.suffix in ('.mp4', '.m4a'):
             audio_file = base_name.with_suffix('.mp3')
             if not convert_to_audio(file_path, audio_file):
@@ -85,6 +111,9 @@ def process_file(file_path):
                 ]
                 try:
                     result = subprocess.run(whisper_cmd, capture_output=True, text=True, timeout=3600)
+                    logging.info(f"Whisper output for {file_path}:\n{result.stdout}")
+                    if result.stderr:
+                        logging.warning(f"Whisper warnings/errors for {file_path}:\n{result.stderr}")
                 except subprocess.TimeoutExpired:
                     logging.error(f"Whisper transcription timed out for {file_path}")
                     continue
@@ -116,15 +145,27 @@ def process_file(file_path):
             shutil.rmtree(lock_file, ignore_errors=True)
             logging.info(f"Lock released for {file_path}")
 
+def cleanup_stale_locks():
+    for lock_file in LOCK_DIR.glob('*.lock'):
+        if lock_file.is_dir():
+            shutil.rmtree(lock_file, ignore_errors=True)
+            logging.info(f"Removed stale lock file: {lock_file}")
+
 def main():
     setup_logging()
     LOCK_DIR.mkdir(parents=True, exist_ok=True)
+    cleanup_stale_locks()
 
     pending_files = find_pending_files()
     display_queue(pending_files)
 
-    for file in pending_files:
-        process_file(file)
+    with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_PROCESSES) as executor:
+        futures = [executor.submit(process_file, file) for file in pending_files]
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                logging.error(f"Unhandled exception in thread: {str(e)}")
 
     print("Setting up watches...")
     while True:
@@ -133,8 +174,13 @@ def main():
         if new_files:
             print("New files detected:")
             display_queue(new_files)
-            for file in new_files:
-                process_file(file)
+            with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_PROCESSES) as executor:
+                futures = [executor.submit(process_file, file) for file in new_files]
+                for future in as_completed(futures):
+                    try:
+                        future.result()
+                    except Exception as e:
+                        logging.error(f"Unhandled exception in thread: {str(e)}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="AutoTranscribe: Automatically transcribe audio and video files.")
