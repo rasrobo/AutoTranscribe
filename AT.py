@@ -24,9 +24,9 @@ def setup_logging():
 LOCK_DIR = Path(os.getenv('TEMP', '/tmp')) / "transcription_locks"
 MONITOR_DIR = Path("/mnt/e/AV/Capture")  # Adjust this path as needed
 MAX_RETRIES = 3
-REPETITION_THRESHOLD = 0.95  # Increased from 0.9 to 0.95
-LANGUAGE_MODE = "en"  # Set to "en" for English or "auto" for automatic language detection
-MAX_CONCURRENT_PROCESSES = 2  # Reduced from 4 to 2
+REPETITION_THRESHOLD = 0.95
+LANGUAGE_MODE = "en"
+MAX_CONCURRENT_PROCESSES = 2
 
 def find_pending_files():
     pending_files = []
@@ -111,9 +111,8 @@ def process_file(file_path):
                 ]
                 try:
                     result = subprocess.run(whisper_cmd, capture_output=True, text=True, timeout=3600)
-                    logging.info(f"Whisper output for {file_path}:\n{result.stdout}")
-                    if result.stderr:
-                        logging.warning(f"Whisper warnings/errors for {file_path}:\n{result.stderr}")
+                    logging.debug(f"Whisper stdout:\n{result.stdout}")
+                    logging.debug(f"Whisper stderr:\n{result.stderr}")
                 except subprocess.TimeoutExpired:
                     logging.error(f"Whisper transcription timed out for {file_path}")
                     continue
@@ -131,7 +130,7 @@ def process_file(file_path):
                     logging.info(f"Transcription successful for {file_path}")
                     break
                 else:
-                    logging.error(f"Transcription attempt {attempt + 1} failed for {file_path}: {result.stderr}")
+                    logging.error(f"Transcription failed for {file_path}: {result.stderr}")
             
             if attempt == MAX_RETRIES - 1:
                 logging.error(f"All transcription attempts failed for {file_path}")
