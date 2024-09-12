@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import os
 import subprocess
 import time
@@ -17,16 +15,17 @@ def setup_logging():
     log_dir = home / "logs" / "AutoTranscribe"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "autotranscribe.log"
-    logging.basicConfig(filename=str(log_file), level=logging.DEBUG,
+    logging.basicConfig(filename=str(log_file), level=logging.INFO,
                         format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Define constants
 LOCK_DIR = Path(os.getenv('TEMP', '/tmp')) / "transcription_locks"
 MONITOR_DIR = Path("/mnt/e/AV/Capture")  # Adjust this path as needed
 MAX_RETRIES = 3
-REPETITION_THRESHOLD = 0.95
+REPETITION_THRESHOLD = 0.98  # Increased to reduce false positives
 LANGUAGE_MODE = "en"
-MAX_CONCURRENT_PROCESSES = 2
+MAX_CONCURRENT_PROCESSES = 4  # Adjust based on your system's capabilities
+WHISPER_TIMEOUT = 7200  # 2 hours timeout for Whisper
 
 def find_pending_files():
     pending_files = []
@@ -65,10 +64,7 @@ def convert_to_audio(input_file, output_file):
         "-ac", "2", "-b:a", "192k", "-threads", "1", str(output_file)
     ]
     try:
-        result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, check=True, timeout=1800)
-        logging.info(f"FFmpeg output for {input_file}:\n{result.stdout}")
-        if result.stderr:
-            logging.debug(f"FFmpeg warnings/errors for {input_file}:\n{result.stderr}")
+        result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, check=True, timeout=3600)
         logging.info(f"Successfully converted {input_file} to audio")
         return True
     except subprocess.CalledProcessError as e:
@@ -110,7 +106,7 @@ def process_file(file_path):
                     "--language", LANGUAGE_MODE, "--output_dir", str(output_dir)
                 ]
                 try:
-                    result = subprocess.run(whisper_cmd, capture_output=True, text=True, timeout=3600)
+                    result = subprocess.run(whisper_cmd, capture_output=True, text=True, timeout=WHISPER_TIMEOUT)
                     logging.debug(f"Whisper stdout:\n{result.stdout}")
                     logging.debug(f"Whisper stderr:\n{result.stderr}")
                 except subprocess.TimeoutExpired:
@@ -130,7 +126,7 @@ def process_file(file_path):
                     logging.info(f"Transcription successful for {file_path}")
                     break
                 else:
-                    logging.error(f"Transcription failed for {file_path}: {result.stderr}")
+                    logging.error(f"Transcription attempt {attempt + 1} failed for {file_path}: {result.stderr}")
             
             if attempt == MAX_RETRIES - 1:
                 logging.error(f"All transcription attempts failed for {file_path}")
@@ -155,31 +151,20 @@ def main():
     LOCK_DIR.mkdir(parents=True, exist_ok=True)
     cleanup_stale_locks()
 
-    pending_files = find_pending_files()
-    display_queue(pending_files)
-
-    with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_PROCESSES) as executor:
-        futures = [executor.submit(process_file, file) for file in pending_files]
-        for future in as_completed(futures):
-            try:
-                future.result()
-            except Exception as e:
-                logging.error(f"Unhandled exception in thread: {str(e)}")
-
-    print("Setting up watches...")
     while True:
-        time.sleep(60)  # Check every minute
-        new_files = find_pending_files()
-        if new_files:
-            print("New files detected:")
-            display_queue(new_files)
-            with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_PROCESSES) as executor:
-                futures = [executor.submit(process_file, file) for file in new_files]
-                for future in as_completed(futures):
-                    try:
-                        future.result()
-                    except Exception as e:
-                        logging.error(f"Unhandled exception in thread: {str(e)}")
+        pending_files = find_pending_files()
+        display_queue(pending_files)
+
+        with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_PROCESSES) as executor:
+            futures = [executor.submit(process_file, file) for file in pending_files]
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as e:
+                    logging.error(f"Unhandled exception in thread: {str(e)}")
+
+        print("Waiting for new files...")
+        time.sleep(300)  # Check every 5 minutes
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="AutoTranscribe: Automatically transcribe audio and video files.")
