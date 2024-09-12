@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import os
 import subprocess
 import time
@@ -22,9 +24,9 @@ def setup_logging():
 LOCK_DIR = Path(os.getenv('TEMP', '/tmp')) / "transcription_locks"
 MONITOR_DIR = Path("/mnt/e/AV/Capture")  # Adjust this path as needed
 MAX_RETRIES = 3
-REPETITION_THRESHOLD = 0.98  # Increased to reduce false positives
+REPETITION_THRESHOLD = 0.98  # Increased from 0.95 to 0.98
 LANGUAGE_MODE = "en"
-MAX_CONCURRENT_PROCESSES = 4  # Adjust based on your system's capabilities
+MAX_CONCURRENT_PROCESSES = 4  # Increased from 2 to 4
 WHISPER_TIMEOUT = 7200  # 2 hours timeout for Whisper
 
 def find_pending_files():
@@ -126,7 +128,7 @@ def process_file(file_path):
                     logging.info(f"Transcription successful for {file_path}")
                     break
                 else:
-                    logging.error(f"Transcription attempt {attempt + 1} failed for {file_path}: {result.stderr}")
+                    logging.error(f"Transcription failed for {file_path}: {result.stderr}")
             
             if attempt == MAX_RETRIES - 1:
                 logging.error(f"All transcription attempts failed for {file_path}")
@@ -153,18 +155,19 @@ def main():
 
     while True:
         pending_files = find_pending_files()
-        display_queue(pending_files)
-
-        with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_PROCESSES) as executor:
-            futures = [executor.submit(process_file, file) for file in pending_files]
-            for future in as_completed(futures):
-                try:
-                    future.result()
-                except Exception as e:
-                    logging.error(f"Unhandled exception in thread: {str(e)}")
-
-        print("Waiting for new files...")
-        time.sleep(300)  # Check every 5 minutes
+        if pending_files:
+            display_queue(pending_files)
+            with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_PROCESSES) as executor:
+                futures = [executor.submit(process_file, file) for file in pending_files]
+                for future in as_completed(futures):
+                    try:
+                        future.result()
+                    except Exception as e:
+                        logging.error(f"Unhandled exception in thread: {str(e)}")
+        else:
+            logging.info("No pending files. Waiting for new files...")
+        
+        time.sleep(60)  # Check every minute
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="AutoTranscribe: Automatically transcribe audio and video files.")
