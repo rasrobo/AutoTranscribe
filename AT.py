@@ -68,7 +68,7 @@ def convert_to_audio(input_file, output_file):
         result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, check=True, timeout=1800)
         logging.info(f"FFmpeg output for {input_file}:\n{result.stdout}")
         if result.stderr:
-            logging.warning(f"FFmpeg warnings/errors for {input_file}:\n{result.stderr}")
+            logging.debug(f"FFmpeg warnings/errors for {input_file}:\n{result.stderr}")
         logging.info(f"Successfully converted {input_file} to audio")
         return True
     except subprocess.CalledProcessError as e:
