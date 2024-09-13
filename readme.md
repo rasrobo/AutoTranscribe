@@ -1,91 +1,165 @@
-# AutoTranscribe
+### AutoTranscribe README
 
-AutoTranscribe is a Python script that automates the process of converting and transcribing audio and video files. Leveraging the cutting-edge Whisper speech recognition model, it provides highly accurate transcriptions for a wide range of media content. This tool is designed to seamlessly integrate with screen recordings and other captured media, making it effortless to generate precise text transcripts without manual intervention.
+#### Overview
 
-## Features
+AutoTranscribe is a Python script designed to automatically transcribe audio and video files. It leverages FFmpeg for media processing and Whisper for transcription, making it a powerful tool for converting multimedia content into text.
 
-- Automatic detection of new audio and video files in a specified directory
-- Conversion of video files to audio format when necessary
-- Highly accurate transcription using OpenAI's Whisper model
-- Cross-platform compatibility (Windows, macOS, Linux)
-- Configurable language settings for transcription
-- Robust error handling and logging
+#### Use Case
 
-## Requirements
+AutoTranscribe is ideal for users who need to transcribe large volumes of audio or video files efficiently. Here are some key use cases:
 
-- Python 3.6+
-- FFmpeg
-- OpenAI Whisper
+- **Content Creators**: Transcribe video or audio recordings for blog posts, social media, or other content.
+- **Researchers**: Transcribe interviews, lectures, or other audio/video recordings for research purposes.
+- **Accessibility**: Generate transcripts for audio/video content to improve accessibility.
 
-## Installation
+#### How It Works
 
-1. Clone this repository:
+1. **Directory Monitoring**:
+   - The script continuously monitors a specified directory for new audio and video files.
+   - Supported file formats include MP4, M4A, and MP3.
+
+2. **File Integrity Check**:
+   - Uses FFprobe to check the integrity of each file before processing.
+   - Ensures that files are valid and within a specified duration limit.
+
+3. **Repair Attempt**:
+   - If a file is corrupted, the script attempts to repair it using FFmpeg.
+   - If repair fails, the file is moved to a "corrupt" folder.
+
+4. **Conversion to Audio**:
+   - Converts video files to audio format (MP3) using FFmpeg.
+   - Ensures consistent audio format for transcription.
+
+5. **Transcription**:
+   - Uses Whisper to transcribe the audio files.
+   - Supports multiple languages and models.
+
+6. **Repetitive Output Detection**:
+   - Checks for repetitive output in the transcription results.
+   - Stops transcription if repetitive output is detected.
+
+7. **Lock Management**:
+   - Uses lock files to prevent multiple instances from processing the same file simultaneously.
+   - Ensures that each file is processed only once.
+
+8. **Logging and Error Handling**:
+   - Logs detailed information about the processing steps, including errors and warnings.
+   - Provides robust error handling to ensure the script continues running even if some files fail.
+
+9. **Chunk Processing**:
+   - For large files, breaks them into smaller chunks for efficient processing.
+   - Ensures that chunk files are stored in a temporary directory and cleaned up after processing.
+
+#### Installation and Usage
+
+1. **Prerequisites**:
+   - Install Python 3.x
+   - Install FFmpeg and Whisper
+   - Clone the AutoTranscribe repository
+
+2. **Running the Script**:
+   ```bash
+   python3 AutoTranscribe.py --monitor_dir /path/to/your/directory
    ```
-   git clone https://github.com/rasrobo/AutoTranscribe.git
-   ```
+   Replace `/path/to/your/directory` with the directory containing your audio/video files.
 
-2. Install the required Python packages:
-   ```
-   pip install openai-whisper
-   ```
+3. **Configuration**:
+   - Adjust the `MONITOR_DIR` variable in the script to point to your desired directory.
+   - Modify other constants (e.g., `MAX_CONCURRENT_PROCESSES`, `WHISPER_TIMEOUT`) as needed.
 
-3. Ensure FFmpeg is installed on your system and accessible from the command line.
+#### SEO Keywords
 
-## Usage
+- **Automatic Transcription**
+- **Audio Transcription**
+- **Video Transcription**
+- **FFmpeg**
+- **Whisper**
+- **Python Script**
+- **Media Processing**
+- **Content Accessibility**
 
-1. Edit the `MONITOR_DIR` variable in the script to point to your desired directory:
-   ```python
-   MONITOR_DIR = Path("/path/to/your/media/folder")
-   ```
+#### Behind the Scenes
 
-2. Run the script:
-   ```
-   python autotranscribe.py
-   ```
+Here's a detailed look at what the script does behind the scenes:
 
-3. (Optional) Specify a different monitor directory when running the script:
-   ```
-   python autotranscribe.py --monitor_dir /path/to/your/media/folder
-   ```
+1. **Directory Scanning**:
+    ```python
+    pending_files = find_pending_files()
+    ```
+    The script scans the specified directory for new files every minute.
 
-## Configuration
+2. **File Integrity Check**:
+    ```python
+    if not is_valid_media_file(file_path):
+        if attempt_repair(file_path):
+            logging.info(f"File {file_path} was successfully repaired")
+        else:
+            logging.error(f"Unable to repair {file_path}")
+            return
+    ```
+    It checks each file's integrity using FFprobe and attempts to repair corrupted files.
 
-You can customize the script by modifying the following variables at the top of the file:
+3. **Conversion to Audio**:
+    ```python
+    if file_path.suffix in ('.mp4', '.m4a'):
+        audio_file = base_name.with_suffix('.mp3')
+        if not convert_to_audio(file_path, audio_file):
+            return
+        file_path = audio_file
+    ```
+    Video files are converted to audio format using FFmpeg.
 
-- `LANGUAGE_MODE`: Set to "en" for English or "auto" for automatic language detection.
-- `MAX_RETRIES`: Maximum number of transcription attempts per file.
-- `REPETITION_THRESHOLD`: Similarity threshold for detecting repetitive output.
+4. **Transcription**:
+    ```python
+    whisper_cmd = [
+        "whisper", str(file_path), "--model", "tiny",
+        "--language", LANGUAGE_MODE, "--output_dir", str(output_dir)
+    ]
+    result = subprocess.run(whisper_cmd, capture_output=True, text=True, timeout=WHISPER_TIMEOUT)
+    ```
+    The script uses Whisper to transcribe the audio files.
 
-## How It Works
+5. **Repetitive Output Detection**:
+    ```python
+    if check_repetition(result.stdout):
+        logging.warning(f"Repetitive output detected for {file_path}. Stopping transcription.")
+    ```
+    It checks for repetitive output in the transcription results.
 
-1. The script monitors a specified directory for new audio and video files.
-2. When a new file is detected, it's converted to a suitable audio format if needed.
-3. The audio is then transcribed using the Whisper speech recognition model.
-4. Transcripts are saved alongside the original files.
+6. **Lock Management**:
+    ```python
+    lock_file = LOCK_DIR / f"{base_name.name}.lock"
+    if lock_file.exists():
+        logging.info(f"Skipping {file_path} as it is currently being processed by another instance.")
+        return
+    ```
+    The script uses lock files to prevent multiple instances from processing the same file simultaneously.
 
-## Automation
+7. **Chunk Processing**:
+    ```python
+    def process_large_file(file_path, chunk_duration=CHUNK_DURATION):
+        audio = AudioSegment.from_file(file_path)
+        total_duration = len(audio) / 1000  # in seconds
+        chunks = []
+        for i in range(0, int(total_duration), chunk_duration):
+            chunk = audio[i*1000:(i+chunk_duration)*1000]
+            chunk_file = f"{file_path.stem}_chunk_{i}.mp3"
+            chunk.export(chunk_file, format="mp3")
+            chunks.append(chunk_file)
+        return chunks
+    ```
+    For large files, the script breaks them into smaller chunks for efficient processing.
 
-To run AutoTranscribe continuously:
+8. **Temporary Directory Cleanup**:
+    ```python
+    temp_dir = Path(os.getenv('TEMP', '/tmp')) / "transcription_chunks"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    chunk_files = [temp_dir / f"{file_path.stem}_chunk_{i}.mp3" for i in range(chunks)]
+    # Process chunks and clean up
+    for chunk_file in chunk_files:
+        chunk_file.unlink(missing_ok=True)
+    ```
+    Chunk files are stored in a temporary directory and cleaned up after processing.
 
-1. Use nohup (Linux/macOS):
-   ```
-   nohup python autotranscribe.py &
-   ```
+By running this script against a directory of AV files, you can automate the transcription process efficiently, ensuring that all files are processed correctly and any issues are logged and handled appropriately.
 
-2. Create a scheduled task (Windows) or cron job (Linux/macOS) to run the script periodically.
-
-## Troubleshooting
-
-If you encounter issues:
-
-1. Check the `autotranscribe.log` file for error messages.
-2. Ensure you have the latest versions of FFmpeg and Whisper installed.
-3. Verify that you have read/write permissions in the monitored directory.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details.
