@@ -29,7 +29,7 @@ MONITOR_DIR = Path("/mnt/e/AV/Capture")  # Adjust this path as needed
 MAX_RETRIES = 3
 REPETITION_THRESHOLD = 0.98
 LANGUAGE_MODE = "en"
-MAX_CONCURRENT_PROCESSES = 2  # Reduced from 4 to 2
+MAX_CONCURRENT_PROCESSES = 2
 WHISPER_TIMEOUT = 7200  # 2 hours timeout for Whisper
 MAX_DURATION = 14400  # 4 hours maximum duration for processing
 CHUNK_DURATION = 600  # 10 minutes per chunk
@@ -61,6 +61,9 @@ def is_valid_media_file(file_path):
         return result.returncode == 0 and duration <= MAX_DURATION
     except subprocess.TimeoutExpired:
         logging.error(f"Timeout checking file integrity: {file_path}")
+        return False
+    except ValueError:
+        logging.error(f"Invalid duration value for {file_path}")
         return False
     except Exception as e:
         logging.error(f"Error checking file integrity: {file_path} - {str(e)}")
@@ -94,13 +97,13 @@ def check_repetition(text, threshold=0.9, window_size=100):
     return False
 
 def process_large_file(file_path, chunk_duration=CHUNK_DURATION):
-    audio = AudioSegment.from_file(file_path)
+    audio = AudioSegment.from_file(str(file_path))
     total_duration = len(audio) / 1000  # in seconds
     chunks = []
     for i in range(0, int(total_duration), chunk_duration):
         chunk = audio[i*1000:(i+chunk_duration)*1000]
-        chunk_file = f"{file_path.stem}_chunk_{i}.mp3"
-        chunk.export(chunk_file, format="mp3")
+        chunk_file = file_path.parent / f"{file_path.stem}_chunk_{i}.mp3"
+        chunk.export(str(chunk_file), format="mp3")
         chunks.append(chunk_file)
     return chunks
 
