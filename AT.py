@@ -12,7 +12,7 @@ import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import signal
 import sys
-from pydub import AudioSegment
+import json
 
 # Set up logging
 def setup_logging():
@@ -20,7 +20,7 @@ def setup_logging():
     log_dir = home / "logs" / "AutoTranscribe"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "autotranscribe.log"
-    logging.basicConfig(filename=str(log_file), level=logging.INFO,
+    logging.basicConfig(filename=str(log_file), level=logging.DEBUG,
                         format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Define constants
@@ -30,9 +30,8 @@ MAX_RETRIES = 3
 REPETITION_THRESHOLD = 0.98
 LANGUAGE_MODE = "en"
 MAX_CONCURRENT_PROCESSES = 2
-WHISPER_TIMEOUT = 7200  # 2 hours timeout for Whisper
+WHISPER_TIMEOUT = 14400  # 4 hours timeout for Whisper
 MAX_DURATION = 14400  # 4 hours maximum duration for processing
-CHUNK_DURATION = 600  # 10 minutes per chunk
 
 def find_pending_files():
     pending_files = []
@@ -50,24 +49,23 @@ def display_queue(pending_files):
 
 def is_valid_media_file(file_path):
     try:
-        result = subprocess.run(['ffprobe', '-v', 'error', '-show_entries',
-                                 'format=duration', '-of',
-                                 'default=noprint_wrappers=1:nokey=1', str(file_path)],
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE,
-                                timeout=30)
-        duration = float(result.stdout.decode().strip())
-        logging.debug(f"FFprobe output for {file_path}: {duration}")
-        return result.returncode == 0 and duration <= MAX_DURATION
+        cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', str(file_path)]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            logging.error(f"FFprobe failed for {file_path}: {result.stderr}")
+            return False
+        
+        probe_data = json.loads(result.stdout)
+        duration = float(probe_data['format']['duration'])
+        logging.info(f"File {file_path} duration: {duration} seconds")
+        return 0 < duration <= MAX_DURATION
     except subprocess.TimeoutExpired:
         logging.error(f"Timeout checking file integrity: {file_path}")
-        return False
-    except ValueError:
-        logging.error(f"Invalid duration value for {file_path}")
-        return False
+    except (ValueError, KeyError, json.JSONDecodeError) as e:
+        logging.error(f"Error parsing FFprobe output for {file_path}: {str(e)}")
     except Exception as e:
-        logging.error(f"Error checking file integrity: {file_path} - {str(e)}")
-        return False
+        logging.error(f"Unexpected error checking file integrity: {file_path} - {str(e)}")
+    return False
 
 def convert_to_audio(input_file, output_file):
     ffmpeg_cmd = [
@@ -84,6 +82,37 @@ def convert_to_audio(input_file, output_file):
         logging.error(f"FFmpeg conversion timed out for {input_file}")
     return False
 
+def attempt_repair(input_file):
+    repaired_file = input_file.with_name(f"{input_file.stem}_repaired{input_file.suffix}")
+    
+    if repaired_file.exists():
+        logging.info(f"Overwriting existing repaired file: {repaired_file}")
+        repaired_file.unlink(missing_ok=True)
+    
+    repair_cmd = [
+        "ffmpeg", "-i", str(input_file), "-c", "copy", str(repaired_file)
+    ]
+    try:
+        result = subprocess.run(repair_cmd, capture_output=True, text=True, check=True, timeout=1800)
+        logging.info(f"Attempted repair of {input_file}")
+        
+        if is_valid_media_file(repaired_file):
+            repaired_file.replace(input_file)
+            logging.info(f"Successfully repaired and replaced {input_file}")
+            return True
+        else:
+            logging.error(f"Repair attempt failed for {input_file}: Repaired file is not valid")
+            repaired_file.unlink(missing_ok=True)
+            return False
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Repair attempt failed for {input_file}: {e.stderr}")
+        repaired_file.unlink(missing_ok=True)
+        return False
+    except Exception as e:
+        logging.error(f"Unexpected error during repair of {input_file}: {str(e)}")
+        repaired_file.unlink(missing_ok=True)
+        return False
+
 def check_repetition(text, threshold=0.9, window_size=100):
     words = text.split()
     if len(words) < window_size * 2:
@@ -95,17 +124,6 @@ def check_repetition(text, threshold=0.9, window_size=100):
         if similarity > threshold:
             return True
     return False
-
-def process_large_file(file_path, chunk_duration=CHUNK_DURATION):
-    audio = AudioSegment.from_file(str(file_path))
-    total_duration = len(audio) / 1000  # in seconds
-    chunks = []
-    for i in range(0, int(total_duration), chunk_duration):
-        chunk = audio[i*1000:(i+chunk_duration)*1000]
-        chunk_file = file_path.parent / f"{file_path.stem}_chunk_{i}.mp3"
-        chunk.export(str(chunk_file), format="mp3")
-        chunks.append(chunk_file)
-    return chunks
 
 def process_file(file_path):
     base_name = file_path.with_suffix('')
@@ -121,8 +139,11 @@ def process_file(file_path):
         logging.info(f"Lock acquired for {file_path}")
 
         if not is_valid_media_file(file_path):
-            logging.error(f"Skipping invalid or corrupted file: {file_path}")
-            return
+            if attempt_repair(file_path):
+                logging.info(f"File {file_path} was successfully repaired")
+            else:
+                logging.error(f"Unable to repair {file_path}")
+                return
 
         if file_path.suffix in ('.mp4', '.m4a'):
             audio_file = base_name.with_suffix('.mp3')
@@ -133,22 +154,26 @@ def process_file(file_path):
         if file_path.exists():
             logging.info(f"Transcribing {file_path}")
             
-            if file_path.stat().st_size > 100 * 1024 * 1024:  # If file is larger than 100MB
-                chunks = process_large_file(file_path)
-                transcriptions = []
-                for chunk in chunks:
-                    chunk_transcription = transcribe_chunk(chunk)
-                    transcriptions.append(chunk_transcription)
-                final_transcription = ' '.join(transcriptions)
-            else:
-                final_transcription = transcribe_chunk(file_path)
-
-            if check_repetition(final_transcription):
-                logging.warning(f"Repetitive output detected for {file_path}. Stopping transcription.")
-            else:
-                with open(file_path.with_suffix('.txt'), 'w') as f:
-                    f.write(final_transcription)
-                logging.info(f"Transcription successful for {file_path}")
+            whisper_cmd = [
+                "whisper", str(file_path), "--model", "tiny",
+                "--language", LANGUAGE_MODE, "--output_dir", str(output_dir)
+            ]
+            try:
+                result = subprocess.run(whisper_cmd, capture_output=True, text=True, timeout=WHISPER_TIMEOUT)
+                logging.debug(f"Whisper stdout:\n{result.stdout}")
+                logging.debug(f"Whisper stderr:\n{result.stderr}")
+                
+                if result.returncode == 0:
+                    if check_repetition(result.stdout):
+                        logging.warning(f"Repetitive output detected for {file_path}. Stopping transcription.")
+                    else:
+                        with open(file_path.with_suffix('.txt'), 'w') as f:
+                            f.write(result.stdout)
+                        logging.info(f"Transcription successful for {file_path}")
+                else:
+                    logging.error(f"Transcription failed for {file_path}: {result.stderr}")
+            except subprocess.TimeoutExpired:
+                logging.error(f"Whisper transcription timed out for {file_path}")
         else:
             logging.error(f"Error: {file_path} not found after conversion.")
 
@@ -158,22 +183,6 @@ def process_file(file_path):
         if lock_file.exists():
             shutil.rmtree(lock_file, ignore_errors=True)
             logging.info(f"Lock released for {file_path}")
-
-def transcribe_chunk(chunk_path):
-    whisper_cmd = [
-        "whisper", str(chunk_path), "--model", "tiny",
-        "--language", LANGUAGE_MODE, "--output_dir", str(chunk_path.parent)
-    ]
-    try:
-        result = subprocess.run(whisper_cmd, capture_output=True, text=True, timeout=WHISPER_TIMEOUT)
-        if result.returncode == 0:
-            return result.stdout
-        else:
-            logging.error(f"Transcription failed for {chunk_path}: {result.stderr}")
-            return ""
-    except subprocess.TimeoutExpired:
-        logging.error(f"Whisper transcription timed out for {chunk_path}")
-        return ""
 
 def cleanup_stale_locks():
     for lock_file in LOCK_DIR.glob('*.lock'):
