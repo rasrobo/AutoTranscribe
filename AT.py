@@ -113,6 +113,13 @@ def attempt_repair(input_file):
         repaired_file.unlink(missing_ok=True)
         return False
 
+def move_to_corrupt_folder(file_path):
+    corrupt_folder = file_path.parent / "unable_to_repair_corrupt"
+    corrupt_folder.mkdir(parents=True, exist_ok=True)
+    new_path = corrupt_folder / file_path.name
+    file_path.rename(new_path)
+    logging.info(f"Moved {file_path} to unable_to_repair_corrupt folder")
+
 def check_repetition(text, threshold=0.9, window_size=100):
     words = text.split()
     if len(words) < window_size * 2:
@@ -142,6 +149,7 @@ def process_file(file_path):
             if attempt_repair(file_path):
                 logging.info(f"File {file_path} was successfully repaired")
             else:
+                move_to_corrupt_folder(file_path)
                 logging.error(f"Unable to repair {file_path}")
                 return
 
