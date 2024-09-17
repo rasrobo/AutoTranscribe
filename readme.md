@@ -24,7 +24,7 @@ AutoTranscribe is ideal for users who need to transcribe large volumes of audio 
 
 3. **Repair Attempt**:
    - If a file is corrupted, the script attempts to repair it using FFmpeg.
-   - If repair fails, the file is moved to a "corrupt" folder.
+   - If repair fails, the file is skipped and an error is logged.
 
 4. **Conversion to Audio**:
    - Converts video files to audio format (MP3) using FFmpeg.
@@ -33,6 +33,7 @@ AutoTranscribe is ideal for users who need to transcribe large volumes of audio 
 5. **Transcription**:
    - Uses Whisper to transcribe the audio files.
    - Supports multiple languages and models.
+   - Utilizes the `large-v2` model for highest accuracy in US English transcription.
 
 6. **Repetitive Output Detection**:
    - Checks for repetitive output in the transcription results.
@@ -42,29 +43,39 @@ AutoTranscribe is ideal for users who need to transcribe large volumes of audio 
    - Uses lock files to prevent multiple instances from processing the same file simultaneously.
    - Ensures that each file is processed only once.
 
-8. **Logging and Error Handling**:
-   - Logs detailed information about the processing steps, including errors and warnings.
-   - Provides robust error handling to ensure the script continues running even if some files fail.
+8. **Multi-Threading**:
+   - Utilizes multi-threading to process multiple files concurrently.
+   - The number of concurrent processes can be adjusted using the `MAX_CONCURRENT_PROCESSES` constant (default is 4).
+   - Improves overall transcription speed by leveraging system resources efficiently.
 
-9. **Chunk Processing**:
-   - For large files, breaks them into smaller chunks for efficient processing.
-   - Ensures that chunk files are stored in a temporary directory and cleaned up after processing.
+9. **Metadata Extraction**:
+   - Extracts the creation date from the MP3 metadata, if available.
+   - Includes the creation date in the generated transcript file.
+
+10. **Logging and Error Handling**:
+    - Logs detailed information about the processing steps, including errors and warnings.
+    - Provides robust error handling to ensure the script continues running even if some files fail.
 
 #### Installation and Usage
 
 1. **Prerequisites**:
    - Install Python 3.x
    - Install FFmpeg and Whisper
+   - Install the required Python dependencies:
+     ```
+     pip install mutagen
+     ```
    - Clone the AutoTranscribe repository
 
 2. **Running the Script**:
    ```bash
-   python3 AutoTranscribe.py --monitor_dir /path/to/your/directory
+   python3 AutoTranscribe.py --monitor_dir /path/to/your/directory [--recursive]
    ```
-   Replace `/path/to/your/directory` with the directory containing your audio/video files.
+   - Replace `/path/to/your/directory` with the directory containing your audio/video files.
+   - Use the `--recursive` flag to enable recursive scanning of subdirectories.
 
 3. **Configuration**:
-   - Adjust the `MONITOR_DIR` variable in the script to point to your desired directory.
+   - Adjust the `DEFAULT_MONITOR_DIR` variable in the script to set the default directory to monitor.
    - Modify other constants (e.g., `MAX_CONCURRENT_PROCESSES`, `WHISPER_TIMEOUT`) as needed.
 
 #### SEO Keywords
@@ -77,6 +88,8 @@ AutoTranscribe is ideal for users who need to transcribe large volumes of audio 
 - **Python Script**
 - **Media Processing**
 - **Content Accessibility**
+- **Multi-Threading**
+- **Metadata Extraction**
 
 #### Behind the Scenes
 
@@ -84,9 +97,9 @@ Here's a detailed look at what the script does behind the scenes:
 
 1. **Directory Scanning**:
     ```python
-    pending_files = find_pending_files()
+    pending_files = find_pending_files(recursive=args.recursive, monitor_dir=monitor_dir)
     ```
-    The script scans the specified directory for new files every minute.
+    The script scans the specified directory for new files based on the provided `--recursive` flag and `--monitor_dir` argument.
 
 2. **File Integrity Check**:
     ```python
@@ -97,11 +110,11 @@ Here's a detailed look at what the script does behind the scenes:
             logging.error(f"Unable to repair {file_path}")
             return
     ```
-    It checks each file's integrity using FFprobe and attempts to repair corrupted files.
+    It checks each file's integrity using FFprobe and attempts to repair corrupted files. If repair fails, the file is skipped.
 
 3. **Conversion to Audio**:
     ```python
-    if file_path.suffix in ('.mp4', '.m4a'):
+    if file_path.suffix.lower() in ('.mp4', '.m4a'):
         audio_file = base_name.with_suffix('.mp3')
         if not convert_to_audio(file_path, audio_file):
             return
@@ -112,19 +125,25 @@ Here's a detailed look at what the script does behind the scenes:
 4. **Transcription**:
     ```python
     whisper_cmd = [
-        "whisper", str(file_path), "--model", "tiny",
-        "--language", LANGUAGE_MODE, "--output_dir", str(output_dir)
+        "whisper", escape_path(file_path), "--model", "large-v2",
+        "--language", LANGUAGE_MODE, "--output_dir", escape_path(file_path.parent)
     ]
     result = subprocess.run(whisper_cmd, capture_output=True, text=True, timeout=WHISPER_TIMEOUT)
     ```
-    The script uses Whisper to transcribe the audio files.
+    The script uses Whisper with the `large-v2` model to transcribe the audio files.
 
 5. **Repetitive Output Detection**:
     ```python
-    if check_repetition(result.stdout):
+    if check_repetition(final_transcription):
         logging.warning(f"Repetitive output detected for {file_path}. Stopping transcription.")
+    else:
+        with open(file_path.with_suffix('.txt'), 'w') as f:
+            if formatted_date:
+                f.write(f"Creation Date: {formatted_date}\n\n")
+            f.write(final_transcription)
+        logging.info(f"Transcription completed for {file_path}")
     ```
-    It checks for repetitive output in the transcription results.
+    It checks for repetitive output in the transcription results and stops transcription if detected.
 
 6. **Lock Management**:
     ```python
@@ -135,31 +154,30 @@ Here's a detailed look at what the script does behind the scenes:
     ```
     The script uses lock files to prevent multiple instances from processing the same file simultaneously.
 
-7. **Chunk Processing**:
+7. **Multi-Threading**:
     ```python
-    def process_large_file(file_path, chunk_duration=CHUNK_DURATION):
-        audio = AudioSegment.from_file(file_path)
-        total_duration = len(audio) / 1000  # in seconds
-        chunks = []
-        for i in range(0, int(total_duration), chunk_duration):
-            chunk = audio[i*1000:(i+chunk_duration)*1000]
-            chunk_file = f"{file_path.stem}_chunk_{i}.mp3"
-            chunk.export(chunk_file, format="mp3")
-            chunks.append(chunk_file)
-        return chunks
+    with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_PROCESSES) as executor:
+        future_to_file = {executor.submit(process_file, file): file for file in pending_files}
+        for future in as_completed(future_to_file):
+            file = future_to_file[future]
+            try:
+                future.result()
+            except Exception as e:
+                logging.error(f"Processing failed for {file}: {str(e)}")
     ```
-    For large files, the script breaks them into smaller chunks for efficient processing.
+    The script utilizes multi-threading with a `ThreadPoolExecutor` to process multiple files concurrently. The number of concurrent processes is determined by the `MAX_CONCURRENT_PROCESSES` constant.
 
-8. **Temporary Directory Cleanup**:
+8. **Metadata Extraction**:
     ```python
-    temp_dir = Path(os.getenv('TEMP', '/tmp')) / "transcription_chunks"
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    chunk_files = [temp_dir / f"{file_path.stem}_chunk_{i}.mp3" for i in range(chunks)]
-    # Process chunks and clean up
-    for chunk_file in chunk_files:
-        chunk_file.unlink(missing_ok=True)
+    try:
+        audio_file = File(file_path)
+        if 'TDRC' in audio_file.tags:
+            creation_date = audio_file.tags['TDRC'].text[0]
+        elif 'TDOR' in audio_file.tags:
+            creation_date = audio_file.tags['TDOR'].text[0]
+    except Exception as e:
+        logging.warning(f"Error extracting creation date from {file_path}: {str(e)}")
     ```
-    Chunk files are stored in a temporary directory and cleaned up after processing.
+    The script attempts to extract the creation date from the MP3 metadata using the `mutagen` library. If the creation date is available, it is included in the generated transcript file.
 
-By running this script against a directory of AV files, you can automate the transcription process efficiently, ensuring that all files are processed correctly and any issues are logged and handled appropriately.
-
+By running this script against a directory of AV files, you can automate the transcription process efficiently, ensuring that all files are processed correctly and any issues are logged and handled appropriately. The multi-threading functionality allows for faster processing of large volumes of files by leveraging system resources effectively.
